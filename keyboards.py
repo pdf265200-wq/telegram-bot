@@ -6,7 +6,7 @@ def main_menu_keyboard():
         [KeyboardButton("▶️ تشغيل البوت")],
         [KeyboardButton("🎵 تعديل الأغاني"), KeyboardButton("🎬 استخراج من الفيديو")],
         [KeyboardButton("🖼️ أغنيتي (القائمة المتكاملة)")],
-      #  [KeyboardButton("📊 إحصائياتي"), KeyboardButton("↩️ التراجع عن آخر عملية")],
+       # [KeyboardButton("📊 إحصائياتي"), KeyboardButton("↩️ التراجع عن آخر عملية")],
         [KeyboardButton("🔙 الرجوع إلى البداية")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
