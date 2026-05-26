@@ -10,10 +10,10 @@ from telegram.ext import ContextTypes
 from mutagen.id3 import ID3, TIT2, TPE1, APIC, error as MutagenError
 from PIL import Image
 
-from utils import (check_subscription, is_maintenance, DB_FILE, OWNER_ID, 
+from utils import (is_maintenance, DB_FILE, OWNER_ID, 
                    MAX_FILE_SIZE, get_channel_cover, add_to_history, 
                    undo_last_operation, update_user_stats, log_operation,
-                   auto_backup_db, logger)
+                   auto_backup_db, logger, CHANNEL_USERNAME)
 
 # متغيرات الطابور
 processing_tasks = {}
@@ -21,17 +21,53 @@ task_queue = deque()
 MAX_CONCURRENT = 3
 
 # ============================================
+# دالة موحدة للتحقق من الاشتراك
+# ============================================
+async def check_user_subscription_simple(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> tuple:
+    """دالة موحدة للتحقق من الاشتراك في القناة"""
+    try:
+        member = await context.bot.get_chat_member(CHANNEL_USERNAME, user_id)
+        is_member = member.status not in ["left", "kicked"]
+        return is_member, [CHANNEL_USERNAME] if not is_member else []
+    except Exception as e:
+        logger.error(f"خطأ في فحص الاشتراك: {e}")
+        return False, [CHANNEL_USERNAME]
+
+async def send_subscription_required_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """إرسال رسالة اشتراك إجباري موحدة"""
+    keyboard = [
+        [InlineKeyboardButton(f"📢 اشترك في القناة", url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}")],
+        [InlineKeyboardButton("🔄 تأكد مرة أخرى", callback_data="check_subscription")]
+    ]
+    
+    await update.message.reply_text(
+        f"⚠️ **عذراً، يجب عليك الاشتراك في القناة أولاً!**\n\n"
+        f"📢 **القناة:** {CHANNEL_USERNAME}\n\n"
+        f"🔔 اضغط على الزر أدناه للاشتراك، ثم اضغط 'تأكد مرة أخرى'",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
+
+# ============================================
 # دالة البداية
 # ============================================
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await is_maintenance(update, context): return
+    if await is_maintenance(update, context): 
+        return
+    
     from keyboards import main_menu_keyboard
     
     user = update.effective_user
-    if not await check_subscription(user.id, context):
-        await update.message.reply_text("⚠️ اشترك بالقناة أولاً: @BEXO50")
+    user_id = user.id
+    
+    # التحقق من الاشتراك الموحد
+    is_subscribed, _ = await check_user_subscription_simple(user_id, context)
+    
+    if not is_subscribed:
+        await send_subscription_required_message(update, context)
         return
 
+    # تسجيل المستخدم في قاعدة البيانات
     conn = sqlite3.connect(DB_FILE)
     conn.execute("INSERT OR IGNORE INTO users(user_id, first_name, username, joined_date, last_active) VALUES (?, ?, ?, ?, ?)",
                 (user.id, user.first_name, user.username, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
@@ -42,8 +78,9 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
 
     await update.message.reply_text(
-        f"🚀 أهلاً بك {user.first_name} في بوت الخدمات الصوتية.\n\nإختر ماذا تريد أن تفعل الآن:",
-        reply_markup=main_menu_keyboard()
+        f"🚀 أهلاً بك {user.first_name} في بوت الخدمات الصوتية.\n\nاختر ما تريد أن تفعله الآن:",
+        reply_markup=main_menu_keyboard(),
+        parse_mode="Markdown"
     )
 
 def get_user_files_count(user_id: int) -> int:
@@ -53,6 +90,34 @@ def get_user_files_count(user_id: int) -> int:
     conn.close()
     return count
 
+async def get_user_full_stats(user_id: int) -> str:
+    """إحصائيات مفصلة للمستخدم"""
+    conn = sqlite3.connect(DB_FILE)
+    
+    files_count = conn.execute("SELECT COUNT(*) FROM files WHERE user_id = ?", (user_id,)).fetchone()[0]
+    
+    last_files = conn.execute(
+        "SELECT title, artist, date FROM files WHERE user_id = ? ORDER BY id DESC LIMIT 5",
+        (user_id,)
+    ).fetchall()
+    
+    total_size = conn.execute("SELECT SUM(file_size) FROM files WHERE user_id = ?", (user_id,)).fetchone()[0] or 0
+    
+    conn.close()
+    
+    msg = f"📊 **إحصائياتك الشخصية**\n\n"
+    msg += f"📁 عدد العمليات الناجحة: {files_count}\n"
+    msg += f"💾 إجمالي حجم الملفات: {total_size // (1024*1024)} MB\n\n"
+    
+    if last_files:
+        msg += "**🎵 آخر أعمالك:**\n"
+        for title, artist, date in last_files:
+            msg += f"• {title} - {artist}\n"
+    else:
+        msg += "📭 لا توجد عمليات سابقة بعد\n"
+    
+    return msg
+
 # ============================================
 # معالج الكولباك (الأزرار)
 # ============================================
@@ -60,6 +125,46 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     data = query.data
     user_id = query.from_user.id
+    
+    # ===== زر التحقق من الاشتراك =====
+    if data == "check_subscription":
+        is_subscribed, _ = await check_user_subscription_simple(user_id, context)
+        
+        if is_subscribed:
+            await query.answer("✅ تم التحقق! مرحباً بك", show_alert=True)
+            
+            # تسجيل المستخدم إذا كان جديداً
+            conn = sqlite3.connect(DB_FILE)
+            user = query.from_user
+            conn.execute("INSERT OR IGNORE INTO users(user_id, first_name, username, joined_date, last_active) VALUES (?, ?, ?, ?, ?)",
+                        (user.id, user.first_name, user.username, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                         datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            conn.commit()
+            conn.close()
+            
+            from keyboards import main_menu_keyboard
+            await query.edit_message_text(
+                "✅ **تم التحقق بنجاح!**\n\n"
+                f"🚀 أهلاً بك {user.first_name} في بوت الخدمات الصوتية.\n\nاختر ما تريد أن تفعله الآن:",
+                reply_markup=main_menu_keyboard(),
+                parse_mode="Markdown"
+            )
+        else:
+            await query.answer("⚠️ لا زلت غير مشترك!", show_alert=True)
+            
+            keyboard = [
+                [InlineKeyboardButton(f"📢 اشترك في القناة", url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}")],
+                [InlineKeyboardButton("🔄 تأكد مرة أخرى", callback_data="check_subscription")]
+            ]
+            
+            await query.edit_message_text(
+                f"⚠️ **عذراً، يجب عليك الاشتراك في القناة أولاً!**\n\n"
+                f"📢 **القناة:** {CHANNEL_USERNAME}\n\n"
+                f"🔔 اشترك ثم اضغط 'تأكد مرة أخرى'",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+        return
     
     # ===== زر التراجع =====
     if data == "undo_last":
@@ -101,7 +206,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     
     elif data == "my_stats":
         stats = await get_user_full_stats(user_id)
-        await query.edit_message_text(stats)
+        await query.edit_message_text(stats, parse_mode="Markdown")
         return
     
     # ===== أزرار الجودة =====
@@ -128,67 +233,25 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         from keyboards import main_menu_keyboard
         await query.edit_message_text(
             "🏠 **القائمة الرئيسية**\n\nاختر ما تريد فعله:",
-            reply_markup=main_menu_keyboard()
+            reply_markup=main_menu_keyboard(),
+            parse_mode="Markdown"
         )
-    
-    elif data == "check_subscription":
-        from channels_manager import check_user_subscription, clear_subscription_cache
-        is_subscribed, not_subscribed = await check_user_subscription(user_id, context)
-        
-        if is_subscribed:
-            clear_subscription_cache(user_id)
-            await query.answer("✅ تم التحقق! مرحباً بك", show_alert=True)
-            await start_handler(update, context)
-        else:
-            channels_text = "\n".join([f"• @{ch['username']}" for ch in not_subscribed])
-            await query.answer("⚠️ لا زلت غير مشترك!", show_alert=True)
-            
-            keyboard = []
-            for ch in not_subscribed:
-                keyboard.append([InlineKeyboardButton(f"📢 اشترك في القناة", url=f"https://t.me/{ch['username']}")])
-            keyboard.append([InlineKeyboardButton("🔄 تأكد مرة أخرى", callback_data="check_subscription")])
-            
-            await query.edit_message_text(
-                f"⚠️ **عذراً، يجب عليك الاشتراك في القنوات التالية:**\n\n{channels_text}",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-
-#async def get_user_full_stats(user_id: int) -> str:
-    #"""إحصائيات مفصلة للمستخدم"""
-    #conn = sqlite3.connect(DB_FILE)
-    
-  #  files_count = conn.execute("SELECT COUNT(*) FROM files WHERE user_id = ?", (user_id,)).fetchone()[0]
-    
-   # last_files = conn.execute(
-     #   "SELECT title, artist, date FROM files WHERE user_id = ? ORDER BY id DESC LIMIT 5",
-     #   (user_id,)
-#    ).fetchall()
-    
-   # total_size = conn.execute("SELECT SUM(file_size) FROM files WHERE user_id = ?", (user_id,)).fetchone()[0] or 0
-    
-   # conn.close()
-    #
-   # msg = f"📊 **إحصائياتك الشخصية**\n\n"
-   # msg += f"📁 عدد العمليات الناجحة: {files_count}\n"
-   # msg += f"💾 إجمالي حجم الملفات: {total_size // (1024*1024)} MB\n\n"
-    
-   # if last_files:
-    #    msg += "**🎵 آخر أعمالك:**\n"
-      #  for title, artist, date in last_files:
-      #      msg += f"• {title} - {artist}\n"
-   # else:
-    #    msg += "📭 لا توجد عمليات سابقة بعد\n"
-    
-    #return msg
 
 # ============================================
 # معالج الملفات (الصوت والفيديو) - MEDIA_HANDLER
 # ============================================
 async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """معالجة الملفات الصوتية والمرئية"""
-    if await is_maintenance(update, context): return
+    if await is_maintenance(update, context): 
+        return
     
     user_id = update.effective_user.id
+    
+    # التحقق من الاشتراك قبل المعالجة
+    is_subscribed, _ = await check_user_subscription_simple(user_id, context)
+    if not is_subscribed:
+        await send_subscription_required_message(update, context)
+        return
     
     # ===== معالج وضع أغنيتي =====
     if context.user_data.get('mysong_mode'):
@@ -323,9 +386,16 @@ async def mysong_media_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 # ============================================
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """معالجة الصور المرسلة"""
-    if await is_maintenance(update, context): return
+    if await is_maintenance(update, context): 
+        return
     
     user_id = update.effective_user.id
+    
+    # التحقق من الاشتراك
+    is_subscribed, _ = await check_user_subscription_simple(user_id, context)
+    if not is_subscribed:
+        await send_subscription_required_message(update, context)
+        return
     
     if context.user_data.get('mysong_mode') and context.user_data.get('step') == 'waiting_for_cover':
         
@@ -386,7 +456,7 @@ async def process_song_with_cover(update: Update, context: ContextTypes.DEFAULT_
         return
     
     try:
-        audio = ID3(audio_path) if os.path.exists(audio_path) else ID3()
+        audio = ID3(audio_path)
         
         audio["TIT2"] = TIT2(encoding=3, text=title)
         audio["TPE1"] = TPE1(encoding=3, text=artist)
@@ -421,8 +491,13 @@ async def process_song_with_cover(update: Update, context: ContextTypes.DEFAULT_
         await add_to_history(user_id, audio_path, f"تعديل {title}")
         await wait_msg.delete()
         
+        # تحديث إحصائيات المستخدم
+        update_user_stats(user_id)
+        log_operation(user_id, "edit_song", "success")
+        
     except Exception as e:
         await update.message.reply_text(f"❌ حدث خطأ: {str(e)}")
+        log_operation(user_id, "edit_song", f"failed: {str(e)}")
     
     finally:
         for file in [audio_path, cover_path]:
@@ -440,6 +515,13 @@ async def process_song_with_cover(update: Update, context: ContextTypes.DEFAULT_
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     user_id = update.effective_user.id
+    
+    # التحقق من الاشتراك (ما عدا بعض الحالات)
+    if user_text not in ["▶️ تشغيل البوت", "🔙 الرجوع إلى البداية"]:
+        is_subscribed, _ = await check_user_subscription_simple(user_id, context)
+        if not is_subscribed:
+            await send_subscription_required_message(update, context)
+            return
 
     # ===== الإذاعة =====
     if context.user_data.get('admin_step') == 'broadcasting':
@@ -465,13 +547,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from keyboards import my_song_menu_keyboard
         await update.message.reply_text(
             "🖼️ **قائمة أغنيتي المتكاملة**\n\nاختر ما تريد:",
-            reply_markup=my_song_menu_keyboard()
+            reply_markup=my_song_menu_keyboard(),
+            parse_mode="Markdown"
         )
         return
     
     elif user_text == "📊 إحصائياتي":
         stats = await get_user_full_stats(user_id)
-        await update.message.reply_text(stats)
+        await update.message.reply_text(stats, parse_mode="Markdown")
         return
     
     elif user_text == "↩️ التراجع عن آخر عملية":
