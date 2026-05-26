@@ -42,7 +42,6 @@ async def send_subscription_required_message(update: Update, context: ContextTyp
     
     await update.message.reply_text(
         f"⚠️ **عذراً، يجب عليك الاشتراك في القناة أولاً!**\n\n"
-        f"📢 **القناة:** {CHANNEL_USERNAME}\n\n"
         f"🔔 اضغط على الزر أدناه للاشتراك، ثم اضغط 'تأكد مرة أخرى'",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
