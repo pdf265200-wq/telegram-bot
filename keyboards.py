@@ -3,6 +3,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMa
 # القائمة الرئيسية (بدون زر تشغيل زائد)
 def main_menu_keyboard():
     keyboard = [
+        [KeyboardButton("▶️ تشغيل البوت")],  # زر في سطر منفصل
         [KeyboardButton("🎵 تعديل الأغنية"), KeyboardButton("🎬 استخراج صوت من فيديو")],
         [KeyboardButton("🖼️ تعديل اغنيه بلكامل  (اسم + صورة + صوت)")],
         [KeyboardButton("📊 إحصائياتي"), KeyboardButton("🛠 لوحة التحكم")] if False else [],
