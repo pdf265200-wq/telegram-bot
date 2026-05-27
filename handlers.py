@@ -1,16 +1,3 @@
-import os
-import subprocess
-import asyncio
-from datetime import datetime
-from telegram import Update
-from telegram.ext import ContextTypes
-from mutagen.id3 import ID3, TIT2, TPE1, APIC, error as MutagenError
-
-from utils import (
-    check_subscription, is_maintenance, DB_FILE, OWNER_ID, 
-    MAX_FILE_SIZE, get_channel_cover, add_user, add_file_record
-)
-
 # ============================================
 # دالة البداية
 # ============================================
@@ -25,7 +12,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⚠️ **أنت غير مشترك في القناة!**\n\n"
             "يجب الاشتراك أولاً في القناة التالية:\n"
-            f"👉 @THTOMI\n\n"
+            f"👉 @BEXO50\n\n"
             "بعد الاشتراك، ارسل /start مرة أخرى."
         )
         return
@@ -380,38 +367,64 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ لست في وضع إضافة صورة حالياً. اختر '🖼️ إنشاء أغنية كاملة' أولاً.")
 
 # ============================================
-# معالج النصوص
+# معالج النصوص (معدل مع زر تشغيل البوت)
 # ============================================
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     user_id = update.effective_user.id
+
+    # ===== الإذاعة للأدمن =====
+    if context.user_data.get('admin_step') == 'broadcasting':
+        if user_id != OWNER_ID:
+            context.user_data['admin_step'] = None
+            return
+        
+        conn = sqlite3.connect(DB_FILE)
+        users = conn.execute("SELECT user_id FROM users").fetchall()
+        conn.close()
+        
+        success_count = 0
+        for u in users:
+            try: 
+                await context.bot.send_message(chat_id=u[0], text=user_text)
+                success_count += 1
+            except: 
+                pass
+        
+        context.user_data['admin_step'] = None
+        await update.message.reply_text(f"✅ تمت الإذاعة بنجاح لـ {success_count} مستخدم.")
+        return
+
+    # ===== أزرار القائمة الرئيسية (معدلة مع زر تشغيل البوت) =====
     
-    # ===== قائمة الأزرار الرئيسية =====
-    if user_text == "🎵 تعديل الأغنية":
-        from keyboards import quality_keyboard
-        await update.message.reply_text(
-            "🎵 **تعديل أغنية**\n\nاختر جودة الصوت المطلوبة:",
-            reply_markup=quality_keyboard("edit")
-        )
+    # زر تشغيل البوت
+    if user_text == "▶️ تشغيل البوت":
+        await start_handler(update, context)
         return
     
+    # زر تعديل الأغاني
+    elif user_text == "🎵 تعديل الأغنية":
+        from keyboards import quality_keyboard
+        await update.message.reply_text("اختر الجودة المطلوبة للتعديل:", reply_markup=quality_keyboard("edit"))
+        return
+    
+    # زر استخراج من الفيديو
     elif user_text == "🎬 استخراج صوت من فيديو":
         from keyboards import quality_keyboard
-        await update.message.reply_text(
-            "🎬 **استخراج صوت من فيديو**\n\nاختر جودة الصوت المطلوبة:",
-            reply_markup=quality_keyboard("extract")
-        )
+        await update.message.reply_text("اختر الجودة المطلوبة للاستخراج:", reply_markup=quality_keyboard("extract"))
         return
     
+    # زر أغنيتي (القائمة المتكاملة)
     elif user_text == "🖼️ إنشاء أغنية كاملة (اسم + صورة + صوت)":
         from keyboards import my_song_menu_keyboard
         await update.message.reply_text(
-            "🖼️ **إنشاء أغنية كاملة**\n\n"
+            "🖼️ **قائمة أغنيتي المتكاملة**\n\n"
             "اختر ما تريد فعله:",
             reply_markup=my_song_menu_keyboard()
         )
         return
     
+    # زر الإحصائيات
     elif user_text == "📊 إحصائياتي":
         import sqlite3
         conn = sqlite3.connect(DB_FILE)
@@ -427,6 +440,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
+    # زر لوحة التحكم
     elif user_text == "🛠 لوحة التحكم":
         if user_id == OWNER_ID:
             from admin_panel import panel_handler
@@ -434,11 +448,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("❌ هذه الخاصية متاحة للمطور فقط.")
         return
-    
-    # ===== وضع mysong - استقبال النصوص =====
-    if context.user_data.get('mode') and context.user_data.get('step'):
+
+    # ===== معالج وضع أغنيتي (إدخال النصوص) =====
+    if context.user_data.get('mode'):
         step = context.user_data.get('step')
         
+        # استقبال اسم الأغنية
         if step == 'waiting_for_title':
             if len(user_text) > 100:
                 await update.message.reply_text("❌ اسم الأغنية طويل جداً (الحد الأقصى 100 حرف).")
@@ -448,6 +463,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🎤 أرسل الآن **اسم الفنان**:")
             return
         
+        # استقبال اسم الفنان
         elif step == 'waiting_for_artist':
             if len(user_text) > 100:
                 await update.message.reply_text("❌ اسم الفنان طويل جداً (الحد الأقصى 100 حرف).")
@@ -455,27 +471,25 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['artist'] = user_text
             context.user_data['step'] = 'waiting_for_cover'
             await update.message.reply_text(
-                "🖼️ **أرسل صورة الغلاف**\n\n"
-                "يمكنك إرسال صورة كـ:\n"
-                "• صورة عادية (يفضل)\n"
-                "• ملف صورة (JPG/PNG/WEBP)\n\n"
-                "سيتم إضافتها كغلاف للأغنية."
+                "🖼️ **أرسل الآن الصورة** التي تريد استخدامها كغلاف للأغنية\n"
+                "(JPG أو PNG)"
             )
             return
         
+        # إذا كان ينتظر صورة وأرسل نص
         elif step == 'waiting_for_cover':
             await update.message.reply_text("❌ أنا في انتظار صورة وليس نص. أرسل صورة من فضلك.")
             return
-    
-    # ===== إكمال وضع التعديل العادي =====
+
+    # ===== إكمال عملية التعديل القديمة =====
     if "file_path" in context.user_data:
         step = context.user_data.get("step")
         file_path = context.user_data["file_path"]
-        
+
         if step == "title":
             context.user_data["title"] = user_text
             context.user_data["step"] = "artist"
-            await update.message.reply_text("🎤 الآن أرسل **اسم الفنان**:")
+            await update.message.reply_text("🎤 الآن أرسل (اسم الفنان):")
         
         elif step == "artist":
             title = context.user_data["title"]
@@ -489,23 +503,23 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             audio["TIT2"] = TIT2(encoding=3, text=title)
             audio["TPE1"] = TPE1(encoding=3, text=artist)
             
-            # إضافة صورة القناة كغلاف افتراضي
             cover = await get_channel_cover(context)
-            if cover and os.path.exists(cover):
+            if cover:
                 with open(cover, "rb") as img:
-                    if "APIC" in audio:
-                        del audio["APIC"]
                     audio["APIC"] = APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=img.read())
-            
             audio.save(file_path)
-            
+
             with open(file_path, "rb") as f:
                 await update.message.reply_audio(audio=f, title=title, performer=artist)
-            
-            add_file_record(user_id, title, artist)
-            
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            
+
+            # تسجيل العملية
+            conn = sqlite3.connect(DB_FILE)
+            conn.execute(
+                "INSERT INTO files (user_id, title, artist, date) VALUES (?, ?, ?, ?)",
+                (user_id, title, artist, datetime.now().strftime("%Y-%m-%d %H:%M"))
+            )
+            conn.commit()
+            conn.close()
+
+            if os.path.exists(file_path): os.remove(file_path)
             context.user_data.clear()
-            await update.message.reply_text("✅ تم تعديل الأغنية بنجاح!")
