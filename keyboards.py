@@ -4,7 +4,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMa
 def main_menu_keyboard():
     keyboard = [
         [KeyboardButton("🎵 تعديل الأغنية"), KeyboardButton("🎬 استخراج صوت من فيديو")],
-        [KeyboardButton("🖼️ إنشاء أغنية كاملة (اسم + صورة + صوت)")],
+        [KeyboardButton("🖼️ تعديل اغنيه بلكامل  (اسم + صورة + صوت)")],
         [KeyboardButton("📊 إحصائياتي"), KeyboardButton("🛠 لوحة التحكم")] if False else [],
         [KeyboardButton("📊 إحصائياتي")],
     ]
