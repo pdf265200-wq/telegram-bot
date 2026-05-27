@@ -48,7 +48,8 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         
         await query.answer(f"✅ {status_text} وضع الصيانة")
         await query.edit_message_text(
-            f"🛠 تم {status_text} وضع الصيانة.",
+            f"🛠 تم {status_text} وضع الصيانة.\n\n"
+            f"الحالة الحالية: {'🟢 البوت في وضع الصيانة' if utils.MAINTENANCE_MODE else '🔴 البوت يعمل طبيعياً'}",
             reply_markup=admin_panel_keyboard(utils.MAINTENANCE_MODE)
         )
 
@@ -56,10 +57,12 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data['admin_step'] = 'broadcasting'
         await query.edit_message_text(
             "📢 **إذاعة (Broadcast)**\n\n"
-            "أرسل الآن الرسالة (نص فقط) ليتم إرسالها لجميع المستخدمين."
+            "أرسل الآن الرسالة (نص فقط) ليتم إرسالها لجميع المستخدمين.\n\n"
+            "⚠️ تحذير: لا يمكن التراجع عن هذه العملية."
         )
 
     elif query.data == "admin_clean":
+        # تنظيف الملفات المؤقتة فوراً
         deleted = 0
         for file in os.listdir():
             if (file.endswith(".mp3") or file.startswith("input_") or 
@@ -73,9 +76,51 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
                     pass
         await query.answer(f"✅ تم حذف {deleted} ملف مؤقت")
         await query.edit_message_text(
-            f"🗑 **تنظيف الملفات المؤقتة**\n\nتم حذف {deleted} ملف مؤقت بنجاح.",
+            f"🗑 **تنظيف الملفات المؤقتة**\n\n"
+            f"تم حذف {deleted} ملف مؤقت بنجاح.",
             reply_markup=admin_panel_keyboard(utils.MAINTENANCE_MODE)
         )
 
     elif query.data == "close_admin":
         await query.message.delete()
+
+
+# ============================================
+# معالج الإذاعة (الدالة المفقودة)
+# ============================================
+async def broadcast_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """معالج الرسائل للإذاعة"""
+    user_id = update.effective_user.id
+    
+    if user_id != OWNER_ID:
+        return
+    
+    if context.user_data.get('admin_step') == 'broadcasting':
+        broadcast_text = update.message.text
+        
+        conn = sqlite3.connect(DB_FILE)
+        users = conn.execute("SELECT user_id FROM users").fetchall()
+        conn.close()
+        
+        success_count = 0
+        fail_count = 0
+        
+        status_msg = await update.message.reply_text("📢 جاري الإرسال...")
+        
+        for user in users:
+            try:
+                await context.bot.send_message(
+                    chat_id=user[0],
+                    text=f"📢 **إذاعة من المطور**\n\n{broadcast_text}"
+                )
+                success_count += 1
+            except:
+                fail_count += 1
+        
+        await status_msg.edit_text(
+            f"✅ **تمت الإذاعة بنجاح!**\n\n"
+            f"📨 تم الإرسال لـ: {success_count} مستخدم\n"
+            f"❌ فشل الإرسال لـ: {fail_count} مستخدم"
+        )
+        
+        context.user_data['admin_step'] = None
