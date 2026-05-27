@@ -1,3 +1,17 @@
+import os
+import subprocess
+import asyncio
+import sqlite3
+from datetime import datetime
+from telegram import Update
+from telegram.ext import ContextTypes
+from mutagen.id3 import ID3, TIT2, TPE1, APIC, error as MutagenError
+
+from utils import (
+    check_subscription, is_maintenance, DB_FILE, OWNER_ID, 
+    MAX_FILE_SIZE, get_channel_cover, add_user, add_file_record
+)
+
 # ============================================
 # دالة البداية
 # ============================================
@@ -87,7 +101,6 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     
     # ===== أزرار الإحصائيات =====
     elif data == "my_stats":
-        import sqlite3
         conn = sqlite3.connect(DB_FILE)
         files_count = conn.execute(
             "SELECT COUNT(*) FROM files WHERE user_id = ?", (user_id,)
@@ -120,7 +133,7 @@ async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 file_obj = update.message.audio
             elif update.message.document:
                 doc = update.message.document
-                if doc.mime_type == 'audio/mpeg' or doc.file_name.endswith('.mp3'):
+                if doc.mime_type == 'audio/mpeg' or (doc.file_name and doc.file_name.endswith('.mp3')):
                     file_obj = doc
             
             if not file_obj:
@@ -426,7 +439,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # زر الإحصائيات
     elif user_text == "📊 إحصائياتي":
-        import sqlite3
         conn = sqlite3.connect(DB_FILE)
         files_count = conn.execute(
             "SELECT COUNT(*) FROM files WHERE user_id = ?", (user_id,)
@@ -521,5 +533,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.commit()
             conn.close()
 
-            if os.path.exists(file_path): os.remove(file_path)
+            if os.path.exists(file_path): 
+                os.remove(file_path)
             context.user_data.clear()
