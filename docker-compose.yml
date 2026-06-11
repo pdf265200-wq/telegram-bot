@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    container_name: telegram-bot
+    restart: unless-stopped
+    
+    env_file:
+      - .env
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=UTC
+      - FFMPEG_PATH=/usr/bin/ffmpeg
+      - TESSERACT_PATH=/usr/bin/tesseract
+    
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+      - ./bot:/app/bot:ro  # Read-only for security
+    
+    networks:
+      - bot-network
+    
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: bot-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - bot-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: Database backup service
+  backup:
+    image: alpine:latest
+    container_name: bot-backup
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+      - ./backups:/backups
+    command: |
+      sh -c '
+      while true; do
+        if [ -f /data/bot.db ]; then
+          cp /data/bot.db /backups/bot_$(date +%Y%m%d_%H%M%S).db
+          echo "Backup created at $(date)"
+          # Keep only last 7 backups
+          ls -t /backups/bot_*.db | tail -n +8 | xargs -r rm
+        fi
+        sleep 21600
+      done
+      '
+    depends_on:
+      - bot
+
+volumes:
+  redis-data:
+  backup-data:
+
+networks:
+  bot-network:
+    driver: bridge

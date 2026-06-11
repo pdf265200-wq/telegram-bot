@@ -1,0 +1,25 @@
+FROM python:3.12-slim
+
+# Install development dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    tesseract-ocr \
+    tesseract-ocr-ara \
+    tesseract-ocr-eng \
+    git \
+    vim \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
+
+# Install development tools
+RUN pip install debugpy pytest-watch ipython
+
+EXPOSE 8443 5678
+
+CMD ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "bot/main.py"]

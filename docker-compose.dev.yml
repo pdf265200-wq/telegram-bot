@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: telegram-bot-dev
+    restart: unless-stopped
+    
+    env_file:
+      - .env
+    
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+    
+    volumes:
+      - ./bot:/app/bot
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+      - ./tests:/app/tests
+    
+    ports:
+      - "8443:8443"
+    
+    command: python bot/main.py --debug
+    
+    networks:
+      - bot-network
+
+volumes:
+  redis-data:
+
+networks:
+  bot-network:
+    driver: bridge

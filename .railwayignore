@@ -1,0 +1,17 @@
+.git
+.gitignore
+README.md
+tests/
+*.md
+.env.example
+docker-compose.yml
+docker-compose.dev.yml
+Dockerfile
+Dockerfile.dev
+.dockerignore
+Makefile
+run_tests.py
+quick_test.py
+requirements-dev.txt
+.pre-commit-config.yaml
+.coveragerc
